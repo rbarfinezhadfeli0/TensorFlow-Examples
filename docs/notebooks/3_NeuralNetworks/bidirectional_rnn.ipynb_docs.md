@@ -1,0 +1,394 @@
+# Documentation: notebooks/3_NeuralNetworks/bidirectional_rnn.ipynb
+
+## File Metadata
+
+- **File Path**: `notebooks/3_NeuralNetworks/bidirectional_rnn.ipynb`
+- **File Size**: 12053 bytes
+- **File Type**: .ipynb
+- **Purpose**: Jupyter notebook with interactive code examples
+
+## Original Source
+
+```
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "collapsed": true
+   },
+   "source": [
+    "# Bi-directional Recurrent Neural Network Example\n",
+    "\n",
+    "Build a bi-directional recurrent neural network (LSTM) with TensorFlow.\n",
+    "\n",
+    "- Author: Aymeric Damien\n",
+    "- Project: https://github.com/aymericdamien/TensorFlow-Examples/"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## BiRNN Overview\n",
+    "\n",
+    "<img src=\"https://ai2-s2-public.s3.amazonaws.com/figures/2016-11-08/191dd7df9cb91ac22f56ed0dfa4a5651e8767a51/1-Figure2-1.png\" alt=\"nn\" style=\"width: 600px;\"/>\n",
+    "\n",
+    "References:\n",
+    "- [Long Short Term Memory](https://www.researchgate.net/profile/Sepp_Hochreiter/publication/13853244_Long_Short-term_Memory/links/5700e75608aea6b7746a0624/Long-Short-term-Memory.pdf), Sepp Hochreiter & Jurgen Schmidhuber, Neural Computation 9(8): 1735-1780, 1997.\n",
+    "\n",
+    "## MNIST Dataset Overview\n",
+    "\n",
+    "This example is using MNIST handwritten digits. The dataset contains 60,000 examples for training and 10,000 examples for testing. The digits have been size-normalized and centered in a fixed-size image (28x28 pixels) with values from 0 to 1. For simplicity, each image has been flattened and converted to a 1-D numpy array of 784 features (28*28).\n",
+    "\n",
+    "![MNIST Dataset](http://neuralnetworksanddeeplearning.com/images/mnist_100_digits.png)\n",
+    "\n",
+    "To classify images using a recurrent neural network, we consider every image row as a sequence of pixels. Because MNIST image shape is 28*28px, we will then handle 28 sequences of 28 timesteps for every sample.\n",
+    "\n",
+    "More info: http://yann.lecun.com/exdb/mnist/"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "metadata": {
+    "collapsed": false
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Extracting /tmp/data/train-images-idx3-ubyte.gz\n",
+      "Extracting /tmp/data/train-labels-idx1-ubyte.gz\n",
+      "Extracting /tmp/data/t10k-images-idx3-ubyte.gz\n",
+      "Extracting /tmp/data/t10k-labels-idx1-ubyte.gz\n"
+     ]
+    }
+   ],
+   "source": [
+    "from __future__ import print_function\n",
+    "\n",
+    "import tensorflow as tf\n",
+    "from tensorflow.contrib import rnn\n",
+    "import numpy as np\n",
+    "\n",
+    "# Import MNIST data\n",
+    "from tensorflow.examples.tutorials.mnist import input_data\n",
+    "mnist = input_data.read_data_sets(\"/tmp/data/\", one_hot=True)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "metadata": {
+    "collapsed": true
+   },
+   "outputs": [],
+   "source": [
+    "# Training Parameters\n",
+    "learning_rate = 0.001\n",
+    "training_steps = 10000\n",
+    "batch_size = 128\n",
+    "display_step = 200\n",
+    "\n",
+    "# Network Parameters\n",
+    "num_input = 28 # MNIST data input (img shape: 28*28)\n",
+    "timesteps = 28 # timesteps\n",
+    "num_hidden = 128 # hidden layer num of features\n",
+    "num_classes = 10 # MNIST total classes (0-9 digits)\n",
+    "\n",
+    "# tf Graph input\n",
+    "X = tf.placeholder(\"float\", [None, timesteps, num_input])\n",
+    "Y = tf.placeholder(\"float\", [None, num_classes])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "metadata": {
+    "collapsed": true
+   },
+   "outputs": [],
+   "source": [
+    "# Define weights\n",
+    "weights = {\n",
+    "    # Hidden layer weights => 2*n_hidden because of forward + backward cells\n",
+    "    'out': tf.Variable(tf.random_normal([2*num_hidden, num_classes]))\n",
+    "}\n",
+    "biases = {\n",
+    "    'out': tf.Variable(tf.random_normal([num_classes]))\n",
+    "}"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "metadata": {
+    "collapsed": false
+   },
+   "outputs": [],
+   "source": [
+    "def BiRNN(x, weights, biases):\n",
+    "\n",
+    "    # Prepare data shape to match `rnn` function requirements\n",
+    "    # Current data input shape: (batch_size, timesteps, n_input)\n",
+    "    # Required shape: 'timesteps' tensors list of shape (batch_size, num_input)\n",
+    "\n",
+    "    # Unstack to get a list of 'timesteps' tensors of shape (batch_size, num_input)\n",
+    "    x = tf.unstack(x, timesteps, 1)\n",
+    "\n",
+    "    # Define lstm cells with tensorflow\n",
+    "    # Forward direction cell\n",
+    "    lstm_fw_cell = rnn.BasicLSTMCell(num_hidden, forget_bias=1.0)\n",
+    "    # Backward direction cell\n",
+    "    lstm_bw_cell = rnn.BasicLSTMCell(num_hidden, forget_bias=1.0)\n",
+    "\n",
+    "    # Get lstm cell output\n",
+    "    try:\n",
+    "        outputs, _, _ = rnn.static_bidirectional_rnn(lstm_fw_cell, lstm_bw_cell, x,\n",
+    "                                              dtype=tf.float32)\n",
+    "    except Exception: # Old TensorFlow version only returns outputs not states\n",
+    "        outputs = rnn.static_bidirectional_rnn(lstm_fw_cell, lstm_bw_cell, x,\n",
+    "                                        dtype=tf.float32)\n",
+    "\n",
+    "    # Linear activation, using rnn inner loop last output\n",
+    "    return tf.matmul(outputs[-1], weights['out']) + biases['out']"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "metadata": {
+    "collapsed": true
+   },
+   "outputs": [],
+   "source": [
+    "logits = BiRNN(X, weights, biases)\n",
+    "prediction = tf.nn.softmax(logits)\n",
+    "\n",
+    "# Define loss and optimizer\n",
+    "loss_op = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(\n",
+    "    logits=logits, labels=Y))\n",
+    "optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)\n",
+    "train_op = optimizer.minimize(loss_op)\n",
+    "\n",
+    "# Evaluate model (with test logits, for dropout to be disabled)\n",
+    "correct_pred = tf.equal(tf.argmax(prediction, 1), tf.argmax(Y, 1))\n",
+    "accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))\n",
+    "\n",
+    "# Initialize the variables (i.e. assign their default value)\n",
+    "init = tf.global_variables_initializer()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "metadata": {
+    "collapsed": false
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Step 1, Minibatch Loss= 2.6218, Training Accuracy= 0.086\n",
+      "Step 200, Minibatch Loss= 2.1900, Training Accuracy= 0.211\n",
+      "Step 400, Minibatch Loss= 2.0144, Training Accuracy= 0.375\n",
+      "Step 600, Minibatch Loss= 1.8729, Training Accuracy= 0.445\n",
+      "Step 800, Minibatch Loss= 1.8000, Training Accuracy= 0.469\n",
+      "Step 1000, Minibatch Loss= 1.7244, Training Accuracy= 0.453\n",
+      "Step 1200, Minibatch Loss= 1.5657, Training Accuracy= 0.523\n",
+      "Step 1400, Minibatch Loss= 1.5473, Training Accuracy= 0.547\n",
+      "Step 1600, Minibatch Loss= 1.5288, Training Accuracy= 0.500\n",
+      "Step 1800, Minibatch Loss= 1.4203, Training Accuracy= 0.555\n",
+      "Step 2000, Minibatch Loss= 1.2525, Training Accuracy= 0.641\n",
+      "Step 2200, Minibatch Loss= 1.2696, Training Accuracy= 0.594\n",
+      "Step 2400, Minibatch Loss= 1.2000, Training Accuracy= 0.664\n",
+      "Step 2600, Minibatch Loss= 1.1017, Training Accuracy= 0.625\n",
+      "Step 2800, Minibatch Loss= 1.2656, Training Accuracy= 0.578\n",
+      "Step 3000, Minibatch Loss= 1.0830, Training Accuracy= 0.656\n",
+      "Step 3200, Minibatch Loss= 1.1522, Training Accuracy= 0.633\n",
+      "Step 3400, Minibatch Loss= 0.9484, Training Accuracy= 0.680\n",
+      "Step 3600, Minibatch Loss= 1.0470, Training Accuracy= 0.641\n",
+      "Step 3800, Minibatch Loss= 1.0609, Training Accuracy= 0.586\n",
+      "Step 4000, Minibatch Loss= 1.1853, Training Accuracy= 0.648\n",
+      "Step 4200, Minibatch Loss= 0.9438, Training Accuracy= 0.750\n",
+      "Step 4400, Minibatch Loss= 0.7986, Training Accuracy= 0.766\n",
+      "Step 4600, Minibatch Loss= 0.8070, Training Accuracy= 0.750\n",
+      "Step 4800, Minibatch Loss= 0.8382, Training Accuracy= 0.734\n",
+      "Step 5000, Minibatch Loss= 0.7397, Training Accuracy= 0.766\n",
+      "Step 5200, Minibatch Loss= 0.7870, Training Accuracy= 0.727\n",
+      "Step 5400, Minibatch Loss= 0.6380, Training Accuracy= 0.828\n",
+      "Step 5600, Minibatch Loss= 0.7975, Training Accuracy= 0.719\n",
+      "Step 5800, Minibatch Loss= 0.7934, Training Accuracy= 0.766\n",
+      "Step 6000, Minibatch Loss= 0.6628, Training Accuracy= 0.805\n",
+      "Step 6200, Minibatch Loss= 0.7958, Training Accuracy= 0.672\n",
+      "Step 6400, Minibatch Loss= 0.6582, Training Accuracy= 0.773\n",
+      "Step 6600, Minibatch Loss= 0.5908, Training Accuracy= 0.812\n",
+      "Step 6800, Minibatch Loss= 0.6182, Training Accuracy= 0.820\n",
+      "Step 7000, Minibatch Loss= 0.5513, Training Accuracy= 0.812\n",
+      "Step 7200, Minibatch Loss= 0.6683, Training Accuracy= 0.789\n",
+      "Step 7400, Minibatch Loss= 0.5337, Training Accuracy= 0.828\n",
+      "Step 7600, Minibatch Loss= 0.6428, Training Accuracy= 0.805\n",
+      "Step 7800, Minibatch Loss= 0.6708, Training Accuracy= 0.797\n",
+      "Step 8000, Minibatch Loss= 0.4664, Training Accuracy= 0.852\n",
+      "Step 8200, Minibatch Loss= 0.4249, Training Accuracy= 0.859\n",
+      "Step 8400, Minibatch Loss= 0.7723, Training Accuracy= 0.773\n",
+      "Step 8600, Minibatch Loss= 0.4706, Training Accuracy= 0.859\n",
+      "Step 8800, Minibatch Loss= 0.4800, Training Accuracy= 0.867\n",
+      "Step 9000, Minibatch Loss= 0.4636, Training Accuracy= 0.891\n",
+      "Step 9200, Minibatch Loss= 0.5734, Training Accuracy= 0.828\n",
+      "Step 9400, Minibatch Loss= 0.5548, Training Accuracy= 0.875\n",
+      "Step 9600, Minibatch Loss= 0.3575, Training Accuracy= 0.922\n",
+      "Step 9800, Minibatch Loss= 0.4566, Training Accuracy= 0.844\n",
+      "Step 10000, Minibatch Loss= 0.5125, Training Accuracy= 0.844\n",
+      "Optimization Finished!\n",
+      "Testing Accuracy: 0.890625\n"
+     ]
+    }
+  
+... [Content truncated for brevity] ...
+```
+
+## High-Level Overview
+
+This file is located at `notebooks/3_NeuralNetworks/bidirectional_rnn.ipynb` within the TensorFlow Examples repository.
+
+### Purpose
+
+This file is a Jupyter notebook containing interactive code cells, explanatory text, and visualizations for learning TensorFlow.
+
+### Context
+
+Located in the `notebooks/` directory, specifically within `notebooks/3_NeuralNetworks/`, this file is part of the notebook-based tutorials.
+
+
+
+## Detailed Walkthrough
+
+### Notebook Structure
+
+This Jupyter notebook contains interactive code cells demonstrating TensorFlow concepts.
+
+- Total cells: 9
+- Code cells: 7
+- Markdown cells: 2
+
+
+
+## Inline Code Examples
+
+### Example Usage
+
+Open this notebook in Jupyter:
+
+```bash
+jupyter notebook notebooks/3_NeuralNetworks/bidirectional_rnn.ipynb
+```
+
+Then execute cells sequentially to see TensorFlow in action.
+
+
+
+## Design & Architecture
+
+### Architectural Context
+
+This file is part of the TensorFlow Examples educational repository structure. It implements neural network architectures and techniques.
+
+### Design Patterns
+
+- Uses TensorFlow framework for machine learning operations
+
+
+## Performance & Complexity
+
+### Performance Characteristics
+
+- **Batch Processing**: Uses batched operations for efficient data processing
+- **Training Optimization**: Implements iterative training with multiple epochs
+- **Computational Complexity**: Neural network operations can be computationally intensive
+- **Memory Usage**: Deep learning models require significant memory for parameters and activations
+
+For optimal performance, ensure appropriate hardware resources and TensorFlow GPU support if applicable.
+
+
+
+## Security & Safety Considerations
+
+### Security Considerations
+
+As educational example code:
+
+- **Input Validation**: Production use should add input validation and sanitization
+- **Data Privacy**: Be cautious when training on sensitive data
+- **Model Security**: Trained models can potentially leak information about training data
+
+
+
+## Alternatives & Variants
+
+### Alternative Approaches
+
+- **Different Frameworks**: PyTorch, JAX, or MXNet could be used for similar functionality
+- **Model Architectures**: Various network architectures can solve similar problems
+- **Training Strategies**: Different optimizers, learning rates, and regularization techniques are possible
+
+
+
+## Testing & Usage Notes
+
+### Testing Recommendations
+
+To test this notebook:
+
+```bash
+jupyter notebook
+```
+
+Then:
+1. Open the notebook
+2. Run all cells sequentially
+3. Verify outputs and visualizations
+
+### Usage Notes
+
+- Ensure TensorFlow is installed: `pip install tensorflow`
+- Some examples may require additional dependencies
+- GPU support is optional but recommended for large models
+
+
+
+## Related Files
+
+### Related Files in Repository
+
+Files in the same directory:
+
+- [autoencoder.ipynb](autoencoder.ipynb_docs.md)
+- [convolutional_network.ipynb](convolutional_network.ipynb_docs.md)
+- [convolutional_network_raw.ipynb](convolutional_network_raw.ipynb_docs.md)
+- [dcgan.ipynb](dcgan.ipynb_docs.md)
+- [dynamic_rnn.ipynb](dynamic_rnn.ipynb_docs.md)
+- [gan.ipynb](gan.ipynb_docs.md)
+- [neural_network.ipynb](neural_network.ipynb_docs.md)
+- [neural_network_eager_api.ipynb](neural_network_eager_api.ipynb_docs.md)
+- [neural_network_raw.ipynb](neural_network_raw.ipynb_docs.md)
+- [recurrent_network.ipynb](recurrent_network.ipynb_docs.md)
+
+Related implementations:
+
+- Check `examples/` directory for Python script versions
+
+See the [folder index](./index.md) for a complete list of related files.
+
+
+
+## Keywords
+
+activation, rnn, dataset, training, testing, gradient, neural network, lstm, accuracy, loss, mnist, softmax, tensorflow, optimizer
+
+---
+
+*This documentation was automatically generated for comprehensive repository understanding.*

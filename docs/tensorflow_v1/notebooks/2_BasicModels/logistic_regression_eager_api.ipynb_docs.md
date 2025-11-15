@@ -1,0 +1,410 @@
+# Documentation: tensorflow_v1/notebooks/2_BasicModels/logistic_regression_eager_api.ipynb
+
+## File Metadata
+
+- **File Path**: `tensorflow_v1/notebooks/2_BasicModels/logistic_regression_eager_api.ipynb`
+- **File Size**: 7382 bytes
+- **File Type**: .ipynb
+- **Purpose**: Jupyter notebook with interactive code examples
+
+## Original Source
+
+```
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Logistic Regression with Eager API\n",
+    "\n",
+    "A logistic regression implemented using TensorFlow's Eager API.\n",
+    "\n",
+    "- Author: Aymeric Damien\n",
+    "- Project: https://github.com/aymericdamien/TensorFlow-Examples/"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## MNIST Dataset Overview\n",
+    "\n",
+    "This example is using MNIST handwritten digits. The dataset contains 60,000 examples for training and 10,000 examples for testing. The digits have been size-normalized and centered in a fixed-size image (28x28 pixels) with values from 0 to 1. For simplicity, each image has been flattened and converted to a 1-D numpy array of 784 features (28*28).\n",
+    "\n",
+    "![MNIST Dataset](http://neuralnetworksanddeeplearning.com/images/mnist_100_digits.png)\n",
+    "\n",
+    "More info: http://yann.lecun.com/exdb/mnist/"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "metadata": {
+    "collapsed": true
+   },
+   "outputs": [],
+   "source": [
+    "from __future__ import absolute_import, division, print_function\n",
+    "\n",
+    "import tensorflow as tf"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "metadata": {
+    "collapsed": true
+   },
+   "outputs": [],
+   "source": [
+    "# Set Eager API\n",
+    "tf.enable_eager_execution()\n",
+    "tfe = tf.contrib.eager"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Extracting /tmp/data/train-images-idx3-ubyte.gz\n",
+      "Extracting /tmp/data/train-labels-idx1-ubyte.gz\n",
+      "Extracting /tmp/data/t10k-images-idx3-ubyte.gz\n",
+      "Extracting /tmp/data/t10k-labels-idx1-ubyte.gz\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Import MNIST data\n",
+    "from tensorflow.examples.tutorials.mnist import input_data\n",
+    "mnist = input_data.read_data_sets(\"/tmp/data/\", one_hot=False)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "metadata": {
+    "collapsed": true
+   },
+   "outputs": [],
+   "source": [
+    "# Parameters\n",
+    "learning_rate = 0.1\n",
+    "batch_size = 128\n",
+    "num_steps = 1000\n",
+    "display_step = 100"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "metadata": {
+    "collapsed": true
+   },
+   "outputs": [],
+   "source": [
+    "# Iterator for the dataset\n",
+    "dataset = tf.data.Dataset.from_tensor_slices(\n",
+    "    (mnist.train.images, mnist.train.labels))\n",
+    "dataset = dataset.repeat().batch(batch_size).prefetch(batch_size)\n",
+    "dataset_iter = tfe.Iterator(dataset)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "metadata": {
+    "collapsed": true
+   },
+   "outputs": [],
+   "source": [
+    "# Variables\n",
+    "W = tfe.Variable(tf.zeros([784, 10]), name='weights')\n",
+    "b = tfe.Variable(tf.zeros([10]), name='bias')\n",
+    "\n",
+    "# Logistic regression (Wx + b)\n",
+    "def logistic_regression(inputs):\n",
+    "    return tf.matmul(inputs, W) + b\n",
+    "\n",
+    "# Cross-Entropy loss function\n",
+    "def loss_fn(inference_fn, inputs, labels):\n",
+    "    # Using sparse_softmax cross entropy\n",
+    "    return tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(\n",
+    "        logits=inference_fn(inputs), labels=labels))\n",
+    "\n",
+    "# Calculate accuracy\n",
+    "def accuracy_fn(inference_fn, inputs, labels):\n",
+    "    prediction = tf.nn.softmax(inference_fn(inputs))\n",
+    "    correct_pred = tf.equal(tf.argmax(prediction, 1), labels)\n",
+    "    return tf.reduce_mean(tf.cast(correct_pred, tf.float32))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "metadata": {
+    "collapsed": true
+   },
+   "outputs": [],
+   "source": [
+    "# SGD Optimizer\n",
+    "optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)\n",
+    "\n",
+    "# Compute gradients\n",
+    "grad = tfe.implicit_gradients(loss_fn)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Initial loss= 2.302584887\n",
+      "Step: 0001  loss= 2.302584887  accuracy= 0.1172\n",
+      "Step: 0100  loss= 0.952338457  accuracy= 0.7955\n",
+      "Step: 0200  loss= 0.535867393  accuracy= 0.8712\n",
+      "Step: 0300  loss= 0.485415280  accuracy= 0.8757\n",
+      "Step: 0400  loss= 0.433947206  accuracy= 0.8843\n",
+      "Step: 0500  loss= 0.381990731  accuracy= 0.8971\n",
+      "Step: 0600  loss= 0.394154936  accuracy= 0.8947\n",
+      "Step: 0700  loss= 0.391497582  accuracy= 0.8905\n",
+      "Step: 0800  loss= 0.386373103  accuracy= 0.8945\n",
+      "Step: 0900  loss= 0.332039326  accuracy= 0.9096\n",
+      "Step: 1000  loss= 0.358993769  accuracy= 0.9002\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Training\n",
+    "average_loss = 0.\n",
+    "average_acc = 0.\n",
+    "for step in range(num_steps):\n",
+    "\n",
+    "    # Iterate through the dataset\n",
+    "    d = dataset_iter.next()\n",
+    "\n",
+    "    # Images\n",
+    "    x_batch = d[0]\n",
+    "    # Labels\n",
+    "    y_batch = tf.cast(d[1], dtype=tf.int64)\n",
+    "\n",
+    "    # Compute the batch loss\n",
+    "    batch_loss = loss_fn(logistic_regression, x_batch, y_batch)\n",
+    "    average_loss += batch_loss\n",
+    "    # Compute the batch accuracy\n",
+    "    batch_accuracy = accuracy_fn(logistic_regression, x_batch, y_batch)\n",
+    "    average_acc += batch_accuracy\n",
+    "\n",
+    "    if step == 0:\n",
+    "        # Display the initial cost, before optimizing\n",
+    "        print(\"Initial loss= {:.9f}\".format(average_loss))\n",
+    "\n",
+    "    # Update the variables following gradients info\n",
+    "    optimizer.apply_gradients(grad(logistic_regression, x_batch, y_batch))\n",
+    "\n",
+    "    # Display info\n",
+    "    if (step + 1) % display_step == 0 or step == 0:\n",
+    "        if step > 0:\n",
+    "            average_loss /= display_step\n",
+    "            average_acc /= display_step\n",
+    "        print(\"Step:\", '%04d' % (step + 1), \" loss=\",\n",
+    "              \"{:.9f}\".format(average_loss), \" accuracy=\",\n",
+    "              \"{:.4f}\".format(average_acc))\n",
+    "        average_loss = 0.\n",
+    "        average_acc = 0."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Testset Accuracy: 0.9083\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Evaluate model on the test image set\n",
+    "testX = mnist.test.images\n",
+    "testY = mnist.test.labels\n",
+    "\n",
+    "test_acc = accuracy_fn(logistic_regression, testX, testY)\n",
+    "print(\"Testset Accuracy: {:.4f}\".format(test_acc))"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 2",
+   "language": "python",
+   "name": "python2"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 2
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython2",
+   "version": "2.7.14"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 1
+}
+
+```
+
+## High-Level Overview
+
+This file is located at `tensorflow_v1/notebooks/2_BasicModels/logistic_regression_eager_api.ipynb` within the TensorFlow Examples repository.
+
+### Purpose
+
+This file is a Jupyter notebook containing interactive code cells, explanatory text, and visualizations for learning TensorFlow.
+
+### Context
+
+Located in the `tensorflow_v1/` directory, specifically within `tensorflow_v1/notebooks/2_BasicModels/`, this file is part of the TensorFlow 1.x examples collection.
+
+
+
+## Detailed Walkthrough
+
+### Notebook Structure
+
+This Jupyter notebook contains interactive code cells demonstrating TensorFlow concepts.
+
+- Total cells: 11
+- Code cells: 9
+- Markdown cells: 2
+
+
+
+## Inline Code Examples
+
+### Example Usage
+
+Open this notebook in Jupyter:
+
+```bash
+jupyter notebook tensorflow_v1/notebooks/2_BasicModels/logistic_regression_eager_api.ipynb
+```
+
+Then execute cells sequentially to see TensorFlow in action.
+
+
+
+## Design & Architecture
+
+### Architectural Context
+
+This file is part of the TensorFlow Examples educational repository structure. It demonstrates basic machine learning models.
+
+### Design Patterns
+
+- Uses TensorFlow framework for machine learning operations
+
+
+## Performance & Complexity
+
+### Performance Characteristics
+
+- **Batch Processing**: Uses batched operations for efficient data processing
+- **Training Optimization**: Implements iterative training with multiple epochs
+
+For optimal performance, ensure appropriate hardware resources and TensorFlow GPU support if applicable.
+
+
+
+## Security & Safety Considerations
+
+### Security Considerations
+
+As educational example code:
+
+- **Input Validation**: Production use should add input validation and sanitization
+- **Data Privacy**: Be cautious when training on sensitive data
+- **Model Security**: Trained models can potentially leak information about training data
+
+
+
+## Alternatives & Variants
+
+### Alternative Approaches
+
+- **Graph Mode**: This uses eager execution; graph mode (TF 1.x style) is an alternative
+- **Model Architectures**: Various network architectures can solve similar problems
+- **Training Strategies**: Different optimizers, learning rates, and regularization techniques are possible
+
+
+
+## Testing & Usage Notes
+
+### Testing Recommendations
+
+To test this notebook:
+
+```bash
+jupyter notebook
+```
+
+Then:
+1. Open the notebook
+2. Run all cells sequentially
+3. Verify outputs and visualizations
+
+### Usage Notes
+
+- Ensure TensorFlow is installed: `pip install tensorflow`
+- Some examples may require additional dependencies
+- GPU support is optional but recommended for large models
+
+
+
+## Related Files
+
+### Related Files in Repository
+
+Files in the same directory:
+
+- [gradient_boosted_decision_tree.ipynb](gradient_boosted_decision_tree.ipynb_docs.md)
+- [kmeans.ipynb](kmeans.ipynb_docs.md)
+- [linear_regression.ipynb](linear_regression.ipynb_docs.md)
+- [linear_regression_eager_api.ipynb](linear_regression_eager_api.ipynb_docs.md)
+- [logistic_regression.ipynb](logistic_regression.ipynb_docs.md)
+- [nearest_neighbor.ipynb](nearest_neighbor.ipynb_docs.md)
+- [random_forest.ipynb](random_forest.ipynb_docs.md)
+- [word2vec.ipynb](word2vec.ipynb_docs.md)
+
+Related implementations:
+
+- Check `examples/` directory for Python script versions
+
+See the [folder index](./index.md) for a complete list of related files.
+
+
+
+## Keywords
+
+dataset, training, testing, regression, gradient, accuracy, loss, mnist, softmax, tensorflow, optimizer
+
+---
+
+*This documentation was automatically generated for comprehensive repository understanding.*
